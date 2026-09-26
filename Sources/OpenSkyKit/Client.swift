@@ -368,11 +368,34 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     // MARK: - Internals
 
     /// Policy gate wrapper (spec: withComputerUsePolicy).
+    /// Also the lock-screen gate (docs/LOCK-SCREEN.md): while the session is
+    /// locked, mutating actions queue by default (`whenLocked` client option:
+    /// queue | fail | skip) and auto-resume on unlock. Read-only calls
+    /// (getAppState/listApps/policy) bypass this gate on purpose — they are
+    /// safe while parked and let agents observe state across a lock.
     func gated<T>(
         appIdentifier: String,
         requestType: String,
         body: (_ target: SkyPolicyTarget, _ bundleID: String) async throws -> T
     ) async throws -> T {
+        switch await LockInputGate.shared.gate(whenLockedMode) {
+        case .proceed, .proceedAfterQueue:
+            break
+        case .failedLocked:
+            throw SkyComputerUseError(
+                code: SkyComputerUseErrorCode.screenLocked.rawValue,
+                errorName: .screenLocked,
+                message: "Session is locked. Use --when-locked queue (default) to auto-resume after unlock, or fail/skip.",
+                requestType: requestType
+            )
+        case .skippedLocked:
+            throw SkyComputerUseError(
+                code: SkyComputerUseErrorCode.skippedLocked.rawValue,
+                errorName: .skippedLocked,
+                message: "Action skipped because the session is locked (whenLocked=skip).",
+                requestType: requestType
+            )
+        }
         let policyTarget = try resolveForPolicy(appIdentifier)
         let result = policy.policy(for: policyTarget)
         if let error = SkyPolicyStore.error(for: result) {
@@ -380,6 +403,9 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
         }
         return try await body(policyTarget, policyTarget.bundleIdentifier)
     }
+
+    /// Lock-screen behavior for mutating actions (default: queue until unlock).
+    public var whenLockedMode: LockInputGate.Mode = .queue
 
     func gatedVoid(
         appIdentifier: String,

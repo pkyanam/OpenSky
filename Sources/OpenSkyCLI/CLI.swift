@@ -1,22 +1,22 @@
 import Foundation
-import SkyCUALib
+import OpenSkyKit
 
-/// sky-cua demo CLI.
+/// opensky demo CLI.
 /// Usage:
-///   sky-cua list-apps
-///   sky-cua state <app> [--no-shot] [--out DIR]
-///   sky-cua click <app> --x N --y N | --element N [--button left|right|middle] [--count N]
-///   sky-cua press-key <app> "Control_L+a"
-///   sky-cua type <app> "text"
-///   sky-cua set-value <app> --element N --value "text"
-///   sky-cua select-text <app> --element N --text "needle" [--prefix P] [--suffix S]
-///   sky-cua action <app> --element N --action AXPress
-///   sky-cua drag <app> --from-x N --from-y N --to-x N --to-y N
-///   sky-cua scroll <app> --direction down [--pages 1] [--x N --y N | --element N]
-///   sky-cua paste <app> --text "content" [--format text|md|html]
-///   sky-cua policy <app>
+///   opensky list-apps
+///   opensky state <app> [--no-shot] [--out DIR]
+///   opensky click <app> --x N --y N | --element N [--button left|right|middle] [--count N]
+///   opensky press-key <app> "Control_L+a"
+///   opensky type <app> "text"
+///   opensky set-value <app> --element N --value "text"
+///   opensky select-text <app> --element N --text "needle" [--prefix P] [--suffix S]
+///   opensky action <app> --element N --action AXPress
+///   opensky drag <app> --from-x N --from-y N --to-x N --to-y N
+///   opensky scroll <app> --direction down [--pages 1] [--x N --y N | --element N]
+///   opensky paste <app> --text "content" [--format text|md|html]
+///   opensky policy <app>
 
-enum SkyCUACommandLine {
+enum OpenSkyCommandLine {
     static let client = SkyMacComputerUseClient(
         options: SkyClientOptions(
             timeoutSeconds: 30,
@@ -268,7 +268,7 @@ enum SkyCUACommandLine {
     }
 
     static let usage: String = """
-    sky-cua — SkyCUA demo CLI (clean-room macOS computer-use)
+    opensky — OpenSky demo CLI (clean-room macOS computer-use)
 
     commands:
       list-apps

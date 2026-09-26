@@ -1,5 +1,5 @@
 import XCTest
-@testable import SkyCUALib
+@testable import OpenSkyKit
 
 /// Deterministic stub-node tests for depth-first walk ordering, dense stable
 /// indices, serialization format, and node(at:) bounds — no window server.
@@ -12,7 +12,7 @@ final class SkyAXNodeStubTests: XCTestCase {
     private func makeSnapshot() -> SkyAXSnapshot {
         let nodes = [
             SkyAXNode(elementIndex: 0, role: "AXWindow", title: "Stub Window"),
-            SkyAXNode(elementIndex: 1, role: "AXStaticText", value: "Hello SkyCUA"),
+            SkyAXNode(elementIndex: 1, role: "AXStaticText", value: "Hello OpenSky"),
             SkyAXNode(elementIndex: 2, role: "AXButton", title: "OK", actions: ["AXPress"]),
             SkyAXNode(elementIndex: 3, role: "AXTextField", value: "editable text", isEditable: true),
         ]

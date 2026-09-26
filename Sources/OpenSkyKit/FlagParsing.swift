@@ -1,7 +1,7 @@
 import Foundation
 
-/// Simple CLI flag parsing shared by the sky-cua executable; exposed through
-/// SkyCUALib so the XCTest suite can exercise the same parsing path.
+/// Simple CLI flag parsing shared by the opensky executable; exposed through
+/// OpenSkyKit so the XCTest suite can exercise the same parsing path.
 public struct SkyFlags {
     public var raw: [String]
 

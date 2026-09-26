@@ -1,7 +1,7 @@
 import ApplicationServices
 import AppKit
 import XCTest
-@testable import SkyCUALib
+@testable import OpenSkyKit
 
 /// A minimal NSWindow-based stub app that publishes a real AXUIElement tree
 /// inside the test process — no ChatGPT.app or external application required.
@@ -22,7 +22,7 @@ final class TestStubAXApp: NSObject {
 
         labelView = AXStubView(frame: NSRect(x: 10, y: 260, width: 200, height: 20))
         labelView.setAccessibilityRole(.staticText)
-        labelView.setAccessibilityValue("Hello SkyCUA")
+        labelView.setAccessibilityValue("Hello OpenSky")
 
         buttonView = AXStubView(frame: NSRect(x: 10, y: 20, width: 80, height: 30))
         buttonView.setAccessibilityRole(.button)
@@ -127,7 +127,7 @@ final class AXWalkIndexingTests: XCTestCase {
         let field = try XCTUnwrap(snapshot.nodes.first { $0.role == "AXTextField" })
         XCTAssertEqual(field.value, "editable text")
         let label = try XCTUnwrap(snapshot.nodes.first { $0.role == "AXStaticText" })
-        XCTAssertEqual(label.value, "Hello SkyCUA")
+        XCTAssertEqual(label.value, "Hello OpenSky")
     }
 
     func testIndexStabilityAcrossRepeatedWalks() throws {

@@ -71,7 +71,7 @@ public final class SkyPolicyStore: @unchecked Sendable {
     private static let lock = NSLock()
 
     private let defaults: UserDefaults
-    private let suiteKeyPrefix = "SkyCUA.policy."
+    private let suiteKeyPrefix = "OpenSky.policy."
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -225,14 +225,14 @@ extension SkyPolicyStore {
             return SkyComputerUseError(
                 code: SkyComputerUseErrorCode.appNotAllowed.rawValue,
                 errorName: .appNotAllowed,
-                message: "SkyCUA is blocked from using the app '\(result.target.bundleIdentifier)' by policy.",
+                message: "OpenSky is blocked from using the app '\(result.target.bundleIdentifier)' by policy.",
                 requestType: "getAppPolicy"
             )
         case .forbidden:
             return SkyComputerUseError(
                 code: SkyComputerUseErrorCode.appNotAllowed.rawValue,
                 errorName: .policyForbidden,
-                message: "SkyCUA is not allowed to use the app '\(result.target.bundleIdentifier)' for safety reasons.",
+                message: "OpenSky is not allowed to use the app '\(result.target.bundleIdentifier)' for safety reasons.",
                 requestType: "getAppPolicy"
             )
         }

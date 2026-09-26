@@ -1,12 +1,12 @@
 import AppKit
 import XCTest
-@testable import SkyCUALib
+@testable import OpenSkyKit
 
 /// Policy decisions on an isolated UserDefaults suite (no system state).
 final class PolicyStoreTests: XCTestCase {
 
     private func isolatedStore() -> SkyPolicyStore {
-        let name = "SkyCUA.Tests.\(UUID().uuidString)"
+        let name = "OpenSky.Tests.\(UUID().uuidString)"
         let suite = UserDefaults(suiteName: name)!
         suite.removePersistentDomain(forName: name)
         return SkyPolicyStore(defaults: suite)
@@ -177,7 +177,7 @@ final class PasteboardTests: XCTestCase {
     }
 }
 
-/// CLI flag parsing (pure logic, exercised through SkyCUALib).
+/// CLI flag parsing (pure logic, exercised through OpenSkyKit).
 final class CLIFlagsTests: XCTestCase {
 
     func testFlagExtraction() {

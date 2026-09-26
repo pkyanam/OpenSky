@@ -1,4 +1,4 @@
-// SkyCUA — clean-room macOS computer-use framework.
+// OpenSky — clean-room macOS computer-use framework.
 //
 // Interface shapes modeled on the ChatGPT.app "Computer Use" TypeScript API
 // (client.d.ts / sky-window-api.md used as INTERFACE SPEC ONLY, per clean-room
@@ -103,6 +103,7 @@ public enum SkyComputerUseErrorName: String, Sendable {
     case invalidApp
     case ambiguousApp
     case screenLocked
+    case skippedLocked
     case policyDenied
     case policyForbidden
     case unsupportedAction
@@ -120,6 +121,7 @@ public enum SkyComputerUseErrorCode: Int, Sendable {
     case invalidApp = -10010
     case ambiguousApp = -10018
     case screenLocked = -10020
+    case skippedLocked = -10021
     case internalError = -10095
     case noCode = 0
 }
