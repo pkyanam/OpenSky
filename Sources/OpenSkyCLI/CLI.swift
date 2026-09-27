@@ -62,6 +62,12 @@ enum OpenSkyCommandLine {
             case "--skill", "skill":
                 print(AgentSkill.markdown)
                 return
+            case "version", "--version", "-v":
+                SelfUpdate.printVersion()
+                return
+            case "update":
+                await SelfUpdate.run(rest)
+                return
             case "policy":
                 try await policy(rest)
             case "help", "--help", "-h":
@@ -274,7 +280,8 @@ enum OpenSkyCommandLine {
     }
 
     static let usage: String = """
-    opensky — OpenSky demo CLI (clean-room macOS computer-use)
+    opensky — OpenSky (clean-room macOS computer-use for AI agents)
+    give any agent hands: see every app, read AX trees, click, type, drag, scroll
 
     commands:
       list-apps
@@ -289,6 +296,10 @@ enum OpenSkyCommandLine {
       scroll <app> --direction down [--pages 1] [--x N --y N | --element N]
       paste <app> --text T [--format text|md|html]
       policy <app>
+      mcp                                   # speak MCP over stdio for agent harnesses
+      --skill                               # print the full agent-grade manual
+      version                               # print build version
+      update [--check|--install]            # self-update from GitHub releases
       help
 
     app identifiers: bundle id (com.apple.TextEdit), display name (TextEdit), or pid:N

@@ -1,199 +1,161 @@
 # OpenSky
 
 **A clean-room macOS computer-use framework for AI agents — Apple Silicon.**
-Give any agent hands: it can see every app, read every window's accessibility
+Give any agent hands: it can see every running app, read every window's accessibility
 tree, click, type, drag, scroll, and screenshot — through one consistent API,
-on-device, on public macOS frameworks.
+entirely on-device, built on public macOS frameworks. No daemon. No accounts. No telemetry.
 
 > Modeled on the ChatGPT desktop app's Computer Use API surface (its bundled
-> TypeScript definitions and API docs are the interface spec). Every line of
+> TypeScript definitions and API docs serve as the interface spec). Every line of
 > implementation is our own, written on public macOS frameworks. MIT licensed.
 
-## What it is (and isn't)
-
-OpenSky is **three things in one repo**:
-
-| Piece | What it is | Who uses it |
-|---|---|---|
-| **`OpenSkyKit`** | Swift library — the full computer-use engine | Swift/macOS developers embedding agent hands in their app |
-| **`opensky` CLI** | A single static binary on your `PATH` | Humans, shell scripts, and every agent harness that can run a subprocess |
-| **MCP server** | `opensky mcp` — Model Context Protocol stdio server | Claude Desktop/Code, Cursor, Cline, Codex, any MCP client |
-
-It is **not** a `.app`. It is not a daemon you babysit. It is a library + a
-binary + an MCP server that starts on demand and exits when the client exits.
-
-## Install
+## One-line install
 
 ```sh
-git clone https://github.com/pkyanam/OpenSky.git
-cd OpenSky && make install        # builds release, drops `opensky` into /usr/local/bin
-# or: swift build -c release && sudo cp .build/release/opensky /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/pkyanam/OpenSky/main/scripts/install.sh | bash
 ```
 
-Requirements: Apple Silicon Mac, macOS 14+, Xcode 15+ (to build).
-At runtime the binary needs **Accessibility** permission (System Settings →
-Privacy & Security → Accessibility) for input/state, and **Screen Recording**
-permission for screenshots. It prompts once, on first use.
+The installer is **idempotent**: run it again any time to upgrade in place. It
+- puts the `opensky` binary in `~/.local/bin` (added to PATH for you, once),
+- installs the **OpenCode 2 plugin** automatically when OpenCode is present (set `OPENSKY_NO_PLUGIN=1` to skip),
+- swaps the binary atomically — a failed install never breaks an existing one.
 
-## The CLI (this is how agents drive it)
+Prefer no pipe-to-bash? Two-liner:
 
 ```sh
-opensky list-apps                 # every launchable/running app
-opensky state TextEdit            # AX tree + screenshot for one app
-opensky click TextEdit --element 42
-opensky click TextEdit --x 300 --y 200
-opensky type Safari "hello world"
-opensky press-key TextEdit "Control_L+a"
-opensky drag Finder --from-x 10 --from-y 10 --to-x 300 --to-y 300
-opensky scroll Chrome --direction down --pages 2
-opensky paste Notes --text "from clipboard" --format text
-opensky set-value TextEdit --element 42 --value "new text"
-opensky select-text Notes --element 12 --text "invoice" --prefix "total "
-opensky action Finder --element 7 --action AXRaise
-opensky policy TextEdit           # show the approval decision for an app
-opensky mcp                       # speak MCP over stdio (for agent harnesses)
+git clone https://github.com/pkyanam/OpenSky && cd OpenSky
+bash scripts/install.sh
 ```
 
-**The life hack:** every agent harness can teach itself OpenSky in one call:
+Requirements: Apple Silicon Mac, macOS 14+. Source builds need Xcode Command
+Line Tools (`xcode-select --install`); the release download path does not.
+
+At runtime, the first input command prompts for **Accessibility** permission and
+the first screenshot prompts for **Screen Recording** — both one-time per binary.
+
+## Try it (30 seconds)
 
 ```sh
-opensky --skill        # prints a complete agent-grade SKILL.md to stdout
+opensky list-apps                      # every running/launchable app
+opensky state com.apple.TextEdit       # AX tree with [N] element indices + screenshot path
+opensky click TextEdit --element 42    # click an element
+opensky type TextEdit "hello world"    # type text
 ```
 
-`--skill` emits the whole operational manual — command grammar, element-index
-semantics, error taxonomy, permissions troubleshooting, do/don't patterns —
-formatted so an agent can read it once and operate immediately. Harnesses
-should run `opensky --skill > ~/.agent-skills/opensky/SKILL.md` at install.
+## For agents (this is the important part)
+
+Any harness that can run a subprocess can adopt OpenSky in one call:
 
 ```sh
-opensky --help            # human-grade help, every flag explained
-opensky help click        # per-command deep help
+opensky --skill        # prints the complete agent-grade operational manual
 ```
 
-## API (OpenSkyKit, 1:1 with the reference surface)
+`--skill` covers command grammar, the **state → act → re-state** loop (element
+indices are snapshot-scoped — the #1 agent failure mode), app identifier forms,
+the stable error taxonomy, permissions troubleshooting, and do/don't rules.
+Have your agent run it once and save the output as a skill file.
 
-```swift
-import OpenSkyKit
-
-let sky = SkyClient()
-
-for app in try await sky.listApps() {
-    print(app.displayName ?? app.bundleIdentifier ?? "?", app.pid ?? 0)
-}
-
-// See an app: full AX tree (stable element indices) + screenshot
-let state = try await sky.getAppState("com.apple.TextEdit")
-print(state.axText)                      // "[42] AXButton title=Save ..."
-print(state.skyshot?.screenshot?.url)    // file:///.../skyshot-....png
-
-// Touch it: the same grammar as the reference implementation
-try await sky.click(.app("com.apple.TextEdit"), elementIndex: 42)
-try await sky.click(.app("TextEdit"), x: 300, y: 200, clickCount: 2)
-try await sky.pressKey("TextEdit", key: "Control_L+a")
-try await sky.typeText("TextEdit", text: "Hello")
-try await sky.drag(.app("Finder"), fromX: 10, fromY: 10, toX: 300, toY: 300)
-try await sky.scroll("Chrome", direction: .down, pages: 2)
-try await sky.paste("Notes", text: "…", format: .text)
-try await sky.setValue("TextEdit", elementIndex: 42, value: "…")
-try await sky.selectText("Notes", elementIndex: 12, text: "invoice")
-try await sky.performSecondaryAction("Finder", elementIndex: 7, action: "AXRaise")
-
-// Policy: allow/deny/forbidden per app, persisted, risk-rated
-let policy = try await sky.getAppPolicy("com.unknown.app")
-// decision: .allowed / .denied / .forbidden, risk: .low / .high
-```
-
-Method-for-method parity with the reference `MacComputerUseClient` interface;
-see [docs/PARITY.md](docs/PARITY.md) for the mapping table (their method → our
-implementation → the public API used).
-
-## MCP (for agent harnesses)
-
-```sh
-opensky mcp
-```
-
-Speaks Model Context Protocol over stdio. Tools exposed: `list_apps`,
-`get_app_state`, `click`, `type_text`, `press_key`, `drag`, `scroll`, `paste`,
-`set_value`, `select_text`, `perform_secondary_action`, `get_policy`.
-Each tool description is self-contained, so a harness needs zero prior
-knowledge. Register with any MCP client:
+MCP clients (Claude Desktop, Cursor, Cline, Zed…):
 
 ```json
 { "mcpServers": { "opensky": { "command": "opensky", "args": ["mcp"] } } }
 ```
 
-**Adapter philosophy.** Harnesses disagree about everything — Claude wants
-MCP, Codex has its own tool surface, some run raw shell, some import
-libraries. OpenSky meets each at its layer:
+**OpenCode 2** users: the installer drops in a native plugin with 13 tools.
+Verify by asking your model: *"List your tools whose names contain opensky."*
 
-| Harness style | How it connects |
-|---|---|
-| MCP clients (Claude, Cursor, Cline, Zed…) | `opensky mcp` (stdio) |
-| Shell-executing agents (Codex CLI, OpenCode, aider, custom) | `opensky …` subprocess + `--skill` for self-teaching |
-| Swift apps embedding hands | `import OpenSkyKit` |
-| Anything else | JSON-lines mode: `opensky serve --json-lines` (one request per line, one response per line) |
+## Staying up to date
 
-One engine, four doors. The CLI is intentionally the universal adapter:
-string-in, string-out, no SDK required.
+```sh
+opensky update            # check + update (aliases: --check | --install)
+```
 
-## Permissions & safety
+Self-update pulls the latest GitHub release for your architecture and swaps the
+binary atomically in-place (same location, no sudo). No release asset? It
+builds from source automatically (requires Xcode CLT). Re-running the one-line
+installer also upgrades cleanly.
 
-- First input/state call triggers the **Accessibility** prompt; first
-  screenshot triggers **Screen Recording**. Both are one-time per app binary.
-- `policy` implements a per-app approval store: new apps default to
-  **allowed/low-risk** for *read* (state) and require explicit approval for
-  *high-risk* write actions (typing, pasting, set-value) — matching the
-  reference `decision/risk/allowPersistentApproval` model.
-- Nothing leaves the machine. No telemetry, no network. Ever.
+## Commands
+
+```
+opensky list-apps                 # running + launchable apps (id/bundle/pid/frontmost)
+opensky state <app>               # AX tree with [N] indices + screenshot PNG path
+opensky click <app> (--element N | --x N --y N) [--button b] [--count n]
+opensky type <app> "text"
+opensky press-key <app> "Control_L+a"     # X11 keysym chords
+opensky drag <app> --from-x N --from-y N --to-x N --to-y N
+opensky scroll <app> --direction down [--pages N] [--x N --y N | --element N]
+opensky paste <app> --text T [--format text|md|html]
+opensky set-value <app> --element N --value V
+opensky select-text <app> --element N --text T [--prefix P] [--suffix S]
+opensky action <app> --element N --action AXPress
+opensky policy <app>              # per-app approval decision
+opensky mcp                       # MCP stdio server for agent harnesses
+opensky --skill                   # the agent manual
+opensky version / update          # version + self-update
+```
+
+App identifiers: bundle id (`com.apple.TextEdit`) → display name (`TextEdit`) → `pid:1234`.
+
+## Safety model
+
+- **Policy engine**: system-critical apps (Finder, loginwindow, System Settings,
+  keychain, screencapture helpers) are **forbidden** — hard-blocked, never
+  overridable. High-risk apps (Mail, Messages…) require explicit approval for
+  writes. Every decision is queryable: `opensky policy <app>`.
+- **Lock-screen behavior**: while the Mac is locked, input actions are
+  hard-paused and queue by default, auto-resuming on unlock
+  (`--when-locked queue|fail|skip`). OpenSky never injects input into the
+  loginwindow and never records keystroke content. See
+  [docs/LOCK-SCREEN.md](docs/LOCK-SCREEN.md).
+- **Local-only**: no network calls except `opensky update` (GitHub releases).
+  No telemetry. Ever.
 
 ## Performance
 
-- Cold `list-apps`: ~15 ms. `state` on a 350-element tree: ~250 ms including
-  a full-resolution window screenshot.
-- Screenshots stream from **ScreenCaptureKit** (hardware compositor path) —
-  no CGWindowList legacy API (dead on macOS 15+).
-- The AX walker iterates lazily and releases element handles eagerly; a full
-  tree snapshot is a value type — flat, copy-on-write, ~0 allocations steady
-  state per element.
-- Binary is static-linked where possible; ~4 MB, no external runtime deps.
+- Cold `list-apps`: ~15 ms · full `state` (350-element tree + screenshot): ~250 ms
+- Screenshots via **ScreenCaptureKit** (hardware path; legacy APIs are dead on macOS 15+)
+- Static-ish binary (~600 KB), zero runtime dependencies, zero external services
+
+## Using it as a library
+
+```swift
+import OpenSkyKit
+
+let sky = SkyClient()
+for app in try await sky.listApps() { print(app.id) }
+
+let state = try await sky.getAppState("com.apple.TextEdit")
+print(state.skyshot?.text)                  // AX tree with [N] indices
+try await sky.click(app: "com.apple.TextEdit", elementIndex: 42)
+try await sky.typeText(app: "TextEdit", text: "Hello")
+```
+
+Method-for-method parity with the reference surface —
+[docs/PARITY.md](docs/PARITY.md) has the full mapping table.
 
 ## Repository layout
 
 ```
-Sources/OpenSkyKit/     the engine
-  Core.swift            types: AppIdentifier, ElementIndex, errors
-  AppResolver.swift     NSWorkspace app discovery (listApps)
-  AXWalker.swift        AXUIElement depth-first walk → indexed, stable nodes
-  AXActions.swift       AX-level actions (set-value, select-text, secondary)
-  Events.swift          CGEvent synthesis: click/drag/scroll/press/type
-  Pasteboard.swift      paste pipeline (NSPasteboard + AX paste routing)
-  Screenshot.swift      ScreenCaptureKit window capture
-  Policy.swift          per-app approval store (decision/risk/persistent)
-  Client.swift          the SkyClient facade (1:1 reference API)
-  FlagParsing.swift     CLI arg grammar (shared by CLI + MCP layers)
-Sources/OpenSkyCLI/     the `opensky` binary (main + CLI + MCP + --skill)
-Tests/OpenSkyKitTests/  unit + integration tests (no ChatGPT.app needed)
-docs/                   PARITY.md · MCP.md · AGENT-SKILL.md · ARCHITECTURE.md
+Sources/OpenSkyKit/      the engine (AX walker, CGEvent synthesis, SCK capture, policy)
+Sources/OpenSkyCLI/      the opensky binary (CLI + MCP + --skill + self-update)
+Tests/OpenSkyKitTests/   unit + integration tests (23; no external apps required)
+scripts/install.sh       the one-line installer (idempotent)
+plugin/opensky.ts        OpenCode 2 plugin (also installed by the installer)
+docs/                    PARITY · MCP · AGENT-SKILL · LOCK-SCREEN · OPENCODE · APPLICATIONS
 ```
-
-## OpenCode 2 plugin (native integration)
-
-**github.com/pkyanam/opencode-opensky** — 13 native OpenCode custom tools wrapping
-`opensky`, verified end-to-end on opencode 2.0.16. Setup: [docs/OPENCODE.md](docs/OPENCODE.md).
 
 ## Docs
 
 - [docs/OPENCODE.md](docs/OPENCODE.md) — tested OpenCode 2 setup guide
-- [docs/APPLICATIONS.md](docs/APPLICATIONS.md) — what to build on OpenSky
+- [docs/MCP.md](docs/MCP.md) — MCP tools, schemas, error model
+- [docs/AGENT-SKILL.md](docs/AGENT-SKILL.md) — what `--skill` prints and why
+- [docs/LOCK-SCREEN.md](docs/LOCK-SCREEN.md) — lock-screen design (verified against the reference)
 - [docs/PARITY.md](docs/PARITY.md) — 1:1 feature parity audit vs the reference
-- [docs/MCP.md](docs/MCP.md) — MCP server: tools, schemas, client registration
-- [docs/AGENT-SKILL.md](docs/AGENT-SKILL.md) — what `--skill` prints, and why
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engine internals, perf notes
+- [docs/APPLICATIONS.md](docs/APPLICATIONS.md) — what to build on OpenSky
 
 ## Credits & license
 
 Interface inspired by the ChatGPT desktop app's Computer Use API (OpenAI).
-This project is an independent clean-room implementation on public macOS
-frameworks and is not affiliated with or endorsed by OpenAI. MIT — see
-[LICENSE](LICENSE).
+Independent clean-room implementation on public macOS frameworks; not
+affiliated with or endorsed by OpenAI. MIT — see [LICENSE](LICENSE).
