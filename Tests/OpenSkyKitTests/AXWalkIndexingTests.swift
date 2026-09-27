@@ -13,12 +13,14 @@ final class TestStubAXApp: NSObject {
 
     override init() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 300),
+            contentRect: NSRect(x: -4200, y: -4200, width: 420, height: 300), // off-screen: never disturb the user
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = "Stub Window"
+        // Invisible to the user: transparent + off-screen. AX still sees it
+        window.alphaValue = 0.01
 
         labelView = AXStubView(frame: NSRect(x: 10, y: 260, width: 200, height: 20))
         labelView.setAccessibilityRole(.staticText)
@@ -91,6 +93,9 @@ final class AXStubView: NSView {
 final class AXWalkIndexingTests: XCTestCase {
 
     private func makeActivatedStub() throws -> TestStubAXApp {
+        // Off-screen + sub-normal level: the window must exist for AX, but
+        // must never visually disturb the user (blank "Stub Window" flashes).
+
         let stub = TestStubAXApp()
         guard stub.activateForAX() else {
             throw XCTSkip(

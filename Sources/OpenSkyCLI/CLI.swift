@@ -56,6 +56,12 @@ enum OpenSkyCommandLine {
                 try await scroll(rest)
             case "paste":
                 try await paste(rest)
+            case "mcp":
+                try await MCPServer.run()
+                return
+            case "--skill", "skill":
+                print(AgentSkill.markdown)
+                return
             case "policy":
                 try await policy(rest)
             case "help", "--help", "-h":
