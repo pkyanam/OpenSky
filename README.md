@@ -177,8 +177,15 @@ Tests/OpenSkyKitTests/  unit + integration tests (no ChatGPT.app needed)
 docs/                   PARITY.md · MCP.md · AGENT-SKILL.md · ARCHITECTURE.md
 ```
 
+## OpenCode 2 plugin (native integration)
+
+**github.com/pkyanam/opencode-opensky** — 13 native OpenCode custom tools wrapping
+`opensky`, verified end-to-end on opencode 2.0.16. Setup: [docs/OPENCODE.md](docs/OPENCODE.md).
+
 ## Docs
 
+- [docs/OPENCODE.md](docs/OPENCODE.md) — tested OpenCode 2 setup guide
+- [docs/APPLICATIONS.md](docs/APPLICATIONS.md) — what to build on OpenSky
 - [docs/PARITY.md](docs/PARITY.md) — 1:1 feature parity audit vs the reference
 - [docs/MCP.md](docs/MCP.md) — MCP server: tools, schemas, client registration
 - [docs/AGENT-SKILL.md](docs/AGENT-SKILL.md) — what `--skill` prints, and why
