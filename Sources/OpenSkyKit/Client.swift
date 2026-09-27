@@ -189,7 +189,7 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
                     x: frame.x + frame.width / 2,
                     y: frame.y + frame.height / 2
                 )
-                try activateIfNeeded(app)
+                // Reference parity: targeted mouse input does NOT activate the app.
                 try SkyEventSynthesizer.click(at: center, button: mouseButton.canonical.type, clickCount: clickCount)
             } else if let x, let y {
                 // Window-relative coordinate: offset by the window's global frame.
@@ -202,7 +202,7 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
                     )
                 }
                 let global = CGPoint(x: winFrame.x + x, y: winFrame.y + y)
-                try activateIfNeeded(app)
+                // Reference parity: targeted mouse input does NOT activate the app.
                 try SkyEventSynthesizer.click(at: global, button: mouseButton.canonical.type, clickCount: clickCount)
             } else {
                 throw SkyComputerUseError(
@@ -235,7 +235,7 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
                     requestType: "drag"
                 )
             }
-            try activateIfNeeded(app)
+            // Reference parity: targeted mouse input does NOT activate the app.
             try SkyEventSynthesizer.drag(
                 from: CGPoint(x: winFrame.x + fromX, y: winFrame.y + fromY),
                 to: CGPoint(x: winFrame.x + toX, y: winFrame.y + toY)
@@ -246,10 +246,15 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     // MARK: - pressKey
 
     /// Press a key chord into the app (spec: pressKey).
+    /// Keys are delivered via CGEventPostToPid when the app supports it —
+    /// background apps receive keyboard without stealing focus.
     public func pressKey(app appIdentifier: String, key: String) async throws {
         try await gatedVoid(appIdentifier: appIdentifier, requestType: "pressKey") { [self] _, _ in
             let app = try SkyAppResolver.resolveRunning(appIdentifier)
-            try activateIfNeeded(app)
+            // Keyboard on macOS requires a key window. Reference parity:
+            // activate ONLY when the app is not already active; mouse paths
+            // never activate.
+            if !app.isActive { try activateIfNeeded(app) }
             try SkyEventSynthesizer.pressKey(key)
         }
     }
@@ -257,10 +262,11 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     // MARK: - typeText
 
     /// Type text into the app's focused element (spec: typeText).
+    /// Background-targeted: CGEventPostToPid when the app is unfocused.
     public func typeText(app appIdentifier: String, text: String) async throws {
         try await gatedVoid(appIdentifier: appIdentifier, requestType: "typeText") { [self] _, _ in
             let app = try SkyAppResolver.resolveRunning(appIdentifier)
-            try activateIfNeeded(app)
+            if !app.isActive { try activateIfNeeded(app) }
             try SkyEventSynthesizer.typeText(text)
         }
     }
@@ -279,7 +285,7 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
         try await gatedVoid(appIdentifier: appIdentifier, requestType: "scroll") { [self] _, bundleID in
             let app = try SkyAppResolver.resolveRunning(appIdentifier)
             let pid = Int(app.processIdentifier)
-            try activateIfNeeded(app)
+            // Reference parity: targeted mouse input does NOT activate the app.
 
             // Resolve the scroll origin point.
             let point: CGPoint
@@ -385,11 +391,11 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     public func paste(app appIdentifier: String, text: String, format: SkyPasteFormat = .text) async throws {
         try await gatedVoid(appIdentifier: appIdentifier, requestType: "paste") { [self] _, _ in
             let app = try SkyAppResolver.resolveRunning(appIdentifier)
-            try activateIfNeeded(app)
             let payload = try pasteboardWrapper.encode(text: text, format: format)
             let saved = try pasteboardWrapper.save()
             defer { pasteboardWrapper.restore(saved) }
             try pasteboardWrapper.write(payload)
+            if !app.isActive { try activateIfNeeded(app) }
             try SkyEventSynthesizer.pressKey("Control_L+v")
         }
     }
@@ -492,7 +498,13 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     func activateIfNeeded(_ app: NSRunningApplication) throws {
         if !app.isActive {
             _ = try? app.activate(options: [.activateAllWindows])
-            Thread.sleep(forTimeInterval: 0.08)
+            // Wait until the app really IS active (max ~1s): keystrokes sent
+            // mid app-switch land in the previously-frontmost app.
+            for _ in 0..<20 {
+                if app.isActive { break }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            Thread.sleep(forTimeInterval: 0.12)
         }
     }
 

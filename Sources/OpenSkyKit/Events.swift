@@ -135,7 +135,14 @@ public enum SkyEventSynthesizer {
 
     /// Press a key chord. Key names are X11-keysym-style per the spec
     /// ("a", "space", "Return", "Tab", "Control_L+a", "Super_L+d").
-    public static func pressKey(_ chord: String) throws {
+    /// Per-call keyboard target (nil = global HID tap).
+    nonisolated(unsafe) static var currentTargetPid: pid_t?
+
+    /// Press a key chord, optionally targeted at a specific process
+    /// (CGEventPostToPid: keys reach background apps without activation).
+    public static func pressKey(_ chord: String, targetPid: pid_t? = nil) throws {
+        currentTargetPid = targetPid
+        defer { currentTargetPid = nil }
         let parsed = try SkyKeyMap.parse(chord)
         var flags = CGEventFlags()
         for m in parsed.modifiers {
@@ -146,6 +153,9 @@ public enum SkyEventSynthesizer {
             let down = CGEvent(keyboardEventSource: nil, virtualKey: base.keyCode, keyDown: true)
             down?.flags = flags
             try post(down, "pressKey")
+            // Real keyboards hold a key ~50-150ms; browsers/IMEs drop
+            // zero-interval taps (the "hht" failure). 40ms dwell.
+            Thread.sleep(forTimeInterval: 0.04)
             let up = CGEvent(keyboardEventSource: nil, virtualKey: base.keyCode, keyDown: false)
             up?.flags = flags
             try post(up, "pressKey")
@@ -162,17 +172,31 @@ public enum SkyEventSynthesizer {
     }
 
     /// Type a string via Unicode string events (handles emoji/intl chars).
-    public static func typeText(_ text: String) throws {
-        for char in text {
-            let scalar = String(char)
-            var utf16 = Array(scalar.utf16)
+    /// Paced to survive browser input pipelines. Optionally targeted at a
+    /// specific process (keys reach background apps without activation).
+    public static func typeText(_ text: String, targetPid: pid_t? = nil) throws {
+        currentTargetPid = targetPid
+        defer { currentTargetPid = nil }
+        // Chunk into <=10 UTF-16-unit pieces (CGEvent's max string payload):
+        // ONE down event per chunk carries the chunk as its Unicode payload;
+        // the paired up event is a bare virtualKey-0 with NO string, so the
+        // text is delivered exactly once (string-on-up = double delivery in
+        // Chromium's omnibox).
+        var units = Array(text.utf16)
+        var i = 0
+        while i < units.count {
+            let take = min(20, units.count - i)
+            let chunk = Array(units[i..<i+take])
+            i += take
+            var downUtf16 = chunk
             let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
-            down?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+            down?.keyboardSetUnicodeString(stringLength: downUtf16.count, unicodeString: &downUtf16)
             try post(down, "typeText")
-            var upUtf16 = Array(scalar.utf16)
-            let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-            up?.keyboardSetUnicodeString(stringLength: upUtf16.count, unicodeString: &upUtf16)
-            try post(up, "typeText")
+            Thread.sleep(forTimeInterval: 0.022)
+            // No keyup at all for synthetic string events: a paired keyup can
+            // re-deliver the stale Unicode payload in Chromium (the trailing
+            // "mm" bug). Real text entry via IME has no key echo either.
+
         }
     }
 
@@ -188,9 +212,16 @@ public enum SkyEventSynthesizer {
                 requestType: requestType
             )
         }
-        event.post(tap: .cghidEventTap)
+        if let pid = currentTargetPid {
+            event.postToPid(pid)
+        } else {
+            event.post(tap: .cghidEventTap)
+        }
         return event
     }
+
+    /// Per-call keyboard target (nil = global HID tap).
+    /// (single declaration — see also currentTargetPid usage in post())
 
     static func mouseDownType(_ button: SkyMouseButtonType, _ count: Int) -> CGEventType {
         let base: CGEventType
@@ -299,6 +330,10 @@ public enum SkyKeyMap {
         "arrowdown": "Down",
         "arrowleft": "Left",
         "arrowright": "Right",
+        // Literal punctuation: agents type "." not "period".
+        ".": "period", ",": "comma", ";": "semicolon", "'": "apostrophe",
+        "-": "minus", "=": "equal", "[": "bracket_left", "]": "bracket_right",
+        "/": "slash", "`": "grave",
     ]
 
     /// Base keysym -> macOS virtual key code (ANSI layout).
