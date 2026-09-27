@@ -31,6 +31,9 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     /// Snapshot cache: latest AX snapshot per resolved app id.
     private var snapshots: [String: SkyAXSnapshot] = [:]
     private var snapshotLock = NSLock()
+    /// Last mutating-action timestamp per app — drives reference-parity
+    /// auto-wait (state capture settles before returning).
+    private var lastActionAt: [String: Date] = [:]
     /// Apps that already received app-specific instructions (spec behavior).
     private var instructionsDelivered: Set<String> = []
     private let options: SkyClientOptions
@@ -76,9 +79,21 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     /// Capture AX tree + screenshot (spec: getAppState / get_app_state).
     public func getAppState(_ appOrArgs: String, disableDiff: Bool = false) async throws -> SkyWindowAppState {
         try await gated(appIdentifier: appOrArgs, requestType: "getAppState") { [self] target, bundleID in
-            let app = try SkyAppResolver.resolveRunning(appOrArgs)
+            // Parity: transparently launches installed-but-not-running apps.
+            let app = try SkyAppResolver.resolveOrLaunch(appOrArgs)
+            // Reference-parity auto-wait: after a recent mutating action,
+            // wait for the UI to settle before capturing (1s dwell + up to
+            // 5s stability poll). First-ever state returns immediately.
+            await settleAfterAction(bundleID) { [app] in Int(app.processIdentifier) }
             let snapshot = try SkyAXWalker.captureApp(pid: Int(app.processIdentifier), appID: bundleID)
+
+            // Token-efficiency parity: when a previous snapshot exists and
+            // diffing is enabled, deliver a diff instead of the full tree.
+            // Source of previous = in-memory (same process) OR the disk store
+            // (cross-process: CLI/MCP invocations keep diffing across calls).
+            let previous = disableDiff ? nil : (latestSnapshot(bundleID) ?? SkySnapshotStore.loadPrevious(appID: bundleID))
             storeSnapshot(bundleID, snapshot)
+            SkySnapshotStore.persist(appID: bundleID, snapshot: snapshot)
 
             var shot: SkyScreenshot? = nil
             if !options.disableScreenshots, #available(macOS 14.0, *) {
@@ -97,7 +112,14 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
                 instructionsDelivered.insert(bundleID)
             }
 
-            let skyshot = SkyWindowSkyshot(text: snapshot.text, screenshot: shot)
+            let stateText: String
+            if let previous, previous.nodes.count > 0 {
+                let diff = SkyStateDiffer.diff(old: previous, new: snapshot)
+                stateText = diff.text
+            } else {
+                stateText = snapshot.text
+            }
+            let skyshot = SkyWindowSkyshot(text: stateText, screenshot: shot)
             return SkyWindowAppState(
                 app: bundleID,
                 appSpecificInstructions: deliverInstructions,
@@ -141,12 +163,19 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
                 }
                 // Prefer AXPress when available; fall back to center click.
                 if node.actions.contains("AXPress") {
-                    try SkyAXActions.performSecondaryAction(
-                        pid: pid_t(pid),
-                        elementIndex: elementIndex,
-                        action: "AXPress"
-                    )
-                    return
+                    do {
+                        try SkyAXActions.performSecondaryAction(
+                            pid: pid_t(pid),
+                            elementIndex: elementIndex,
+                            action: "AXPress"
+                        )
+                        return
+                    } catch {
+                        // Reference-parity resilience: live AX handles churn
+                        // (re-created web content, reparented rows). If the
+                        // action no longer resolves, fall through to the
+                        // snapshot-frame coordinate click below.
+                    }
                 }
                 guard let frame = node.frame else {
                     throw SkyComputerUseError(
@@ -413,6 +442,10 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
         body: (_ target: SkyPolicyTarget, _ bundleID: String) async throws -> Void
     ) async throws {
         _ = try await gated(appIdentifier: appIdentifier, requestType: requestType, body: body)
+        // Mutating action completed — record for the settle-on-next-state wait.
+        if let target = try? resolveForPolicy(appIdentifier) {
+            noteAction(target.bundleIdentifier)
+        }
     }
 
     /// Resolve the policy target from any identifier form.
@@ -471,8 +504,49 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
 
     func latestSnapshot(_ key: String) -> SkyAXSnapshot? {
         snapshotLock.lock()
+        let mem = snapshots[key]
+        snapshotLock.unlock()
+        // Cross-process parity: CLI/MCP runs are process-per-call, so element
+        // indices from a previous invocation must still resolve. Fall back to
+        // the disk store (populated by the last getState anywhere).
+        return mem ?? SkySnapshotStore.loadPrevious(appID: key)
+    }
+
+    /// Record that a mutating action just ran against `key` (reference-parity:
+    /// the runtime then waits ~1s, +up to 5s while loading indicators churn,
+    /// before the next state capture returns settled state).
+    func noteAction(_ key: String) {
+        snapshotLock.lock()
         defer { snapshotLock.unlock() }
-        return snapshots[key]
+        lastActionAt[key] = Date()
+    }
+
+    /// Wait until the app's UI settles after a recent action (max 6s total).
+    /// Heuristic: require the minimum dwell (1s), then poll the AX tree until
+    /// two consecutive captures agree (or the +5s loading window elapses).
+    func settleAfterAction(_ key: String, pid pidProvider: @escaping () -> Int?) async {
+        let (at, hasAction) = {
+            snapshotLock.lock(); defer { snapshotLock.unlock() }
+            return (lastActionAt[key] ?? .distantPast, lastActionAt[key] != nil)
+        }()
+        guard hasAction else { return }
+        let elapsed = Date().timeIntervalSince(at)
+        let minDwell: TimeInterval = 1.0
+        if elapsed < minDwell {
+            try? await Task.sleep(nanoseconds: UInt64((minDwell - elapsed) * 1_000_000_000))
+        }
+        // Stability poll: up to 5 extra seconds while the tree keeps changing.
+        let deadline = Date().addingTimeInterval(5.0)
+        var lastCount = -1
+        while Date() < deadline {
+            guard let pid = pidProvider() else { return }
+            guard let probe = try? SkyAXWalker.captureApp(pid: pid, appID: key) else { return }
+            let count = probe.nodes.count
+            if count == lastCount, count > 0 { return }  // settled
+            lastCount = count
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        // give up waiting — return current (best-effort) state
     }
 
     /// App-specific instructions registry (spec: appSpecificInstructions).

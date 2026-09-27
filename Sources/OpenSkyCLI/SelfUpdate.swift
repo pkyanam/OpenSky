@@ -11,7 +11,7 @@
 import Foundation
 
 enum SelfUpdate {
-    static let currentVersion = "1.0.0"
+    static let currentVersion = "1.1.0"
     static let repo = "pkyanam/OpenSky"
     static let releaseAPI = "https://api.github.com/repos/\(repo)/releases/latest"
     static let archiveName = "opensky-\(archTag)-macos.tar.xz"

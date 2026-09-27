@@ -17,7 +17,7 @@ enum MCPServer {
         ToolSpec(name: "list_apps", description: "List running and launchable macOS apps (id, bundle id, name, pid, frontmost). Call this first when you don't know an app's identifier.",
                  inputSchema: #"{"type":"object","properties":{},"additionalProperties":false}"#),
         ToolSpec(name: "get_app_state", description: "See one app: accessibility tree with [N] element indices + a screenshot PNG path. Call after every UI mutation before using an element index again — indices are snapshot-scoped.",
-                 inputSchema: #"{"type":"object","properties":{"app":{"type":"string","description":"bundle id, display name, or pid:N"},"no_screenshot":{"type":"boolean","default":false}},"required":["app"],"additionalProperties":false}"#),
+                 inputSchema: #"{"type":"object","properties":{"app":{"type":"string","description":"bundle id, display name, or pid:N"},"no_screenshot":{"type":"boolean","default":false},"disable_diff":{"type":"boolean","default":false,"description":"Force a full tree instead of a compact diff from the previous state"}},"required":["app"],"additionalProperties":false}"#),
         ToolSpec(name: "click", description: "Click an element by index (preferred) or window-relative coordinates.",
                  inputSchema: #"{"type":"object","properties":{"app":{"type":"string"},"element_index":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"button":{"type":"string","enum":["left","right","middle"],"default":"left"},"count":{"type":"integer","default":1}},"required":["app"],"additionalProperties":false}"#),
         ToolSpec(name: "type_text", description: "Type text into the focused element of an app. Click or set_value a field first.",
@@ -106,7 +106,8 @@ enum MCPServer {
             case "get_app_state":
                 let app = args["app"] as? String ?? ""
                 let noShot = args["no_screenshot"] as? Bool ?? false
-                let state = try await client.getAppState(app)
+                let disableDiff = args["disable_diff"] as? Bool ?? false
+                let state = try await client.getAppState(app, disableDiff: disableDiff)
                 var text = state.skyshot?.text ?? "(no AX tree)"
                 if !noShot, let shot = state.skyshot?.screenshot {
                     text += "\n\n[SCREENSHOT] \(shot.url)"

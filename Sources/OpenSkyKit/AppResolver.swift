@@ -135,6 +135,74 @@ public enum SkyAppResolver {
         )
     }
 
+    /// Reference-parity helper: resolve a running app, or transparently
+    /// LAUNCH it when only installed (spec: "No need to open or launch apps;
+    /// get_app_state transparently launches the app in the background").
+    public static func resolveOrLaunch(_ identifier: String, settleSeconds: TimeInterval = 1.5) throws -> NSRunningApplication {
+        if let running = try? resolveRunning(identifier) {
+            return running
+        }
+        // Not running: find it in the installed list (LaunchServices) and launch.
+        guard let bundleID = installedBundleID(for: identifier) else {
+            throw SkyComputerUseError(
+                code: SkyComputerUseErrorCode.runningApplicationNotFound.rawValue,
+                errorName: .runningApplicationNotFound,
+                message: "No running or installed app matches '\(identifier)'",
+                requestType: "resolveApp"
+            )
+        }
+        let conf = NSWorkspace.OpenConfiguration()
+        conf.activates = false   // background launch, like the reference
+        let semaphore = DispatchSemaphore(value: 0)
+        var launched: NSRunningApplication?
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: bundleID), configuration: conf) { app, error in
+            launched = app
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 10)
+        guard let app = launched else {
+            throw SkyComputerUseError(
+                code: SkyComputerUseErrorCode.runningApplicationNotFound.rawValue,
+                errorName: .runningApplicationNotFound,
+                message: "Installed match for '\(identifier)' (\(bundleID)) failed to launch",
+                requestType: "resolveApp"
+            )
+        }
+        Thread.sleep(forTimeInterval: settleSeconds)
+        return app
+    }
+
+    /// Locate an installed app bundle path for an identifier (bundle id, name
+    /// prefix, or .app name) via LaunchServices.
+    static func installedBundleID(for identifier: String) -> String? {
+        // bundle id direct: try to find an .app with this bundle id
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) {
+            return url.path
+        }
+        // name: search /Applications + ~/Applications
+        let lowered = identifier.lowercased()
+        let candidates = identifier.hasSuffix(".app")
+            ? [identifier]
+            : ["\(identifier).app"]
+        let searchDirs = ["/Applications", NSString(string: "~/Applications").expandingTildeInPath,
+                          "/System/Applications"]
+        for dir in searchDirs {
+            for name in candidates {
+                let path = (dir as NSString).appendingPathComponent(name)
+                if FileManager.default.fileExists(atPath: path) { return path }
+            }
+        }
+        // fuzzy: any .app whose name contains the identifier
+        for dir in searchDirs {
+            if let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) {
+                if let hit = entries.first(where: { $0.lowercased().contains(lowered) && $0.hasSuffix(".app") }) {
+                    return (dir as NSString).appendingPathComponent(hit)
+                }
+            }
+        }
+        return nil
+    }
+
     static func displayName(of app: NSRunningApplication) -> String? {
         if let n = app.localizedName, !n.isEmpty { return n }
         if let url = app.bundleURL {

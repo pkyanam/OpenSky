@@ -22,7 +22,10 @@ enum AgentSkill {
     ## The core loop (memorize this)
     1. `opensky list-apps` — find the app (bundle id, name, or pid:N).
     2. `opensky state <app>` — see its windows: the AX tree with `[N]`
-       element indices + a screenshot path.
+       element indices + a screenshot path. By default the SECOND and later
+       state calls return a COMPACT DIFF from the previous tree (removed/
+       added/changed only) — pass `--full` when you need the complete tree
+       again (e.g. after losing track). First call is always full.
     3. Act with an index or coordinates: `opensky click <app> --element 42`.
     4. **Re-state.** Element indices are snapshot-scoped. After ANY UI
        mutation (your action or the app's), call `state` again before the

@@ -77,6 +77,7 @@ export default {
                     properties: {
                         app: { type: "string", description: "bundle id, display name, or pid:N" },
                         no_screenshot: { type: "boolean", description: "Skip the screenshot (faster). Default false." },
+                        disable_diff: { type: "boolean", description: "Force a full AX tree instead of a compact diff from the previous state. Default false (diff, token-efficient)." },
                     },
                     required: ["app"],
                     additionalProperties: false,
@@ -84,6 +85,7 @@ export default {
                 async execute(input: any) {
                     const argv = ["state", input.app]
                     if (input.no_screenshot) argv.push("--no-shot")
+                    if (input.disable_diff) argv.push("--full")
                     return text(await run(argv, 60_000))
                 },
             })

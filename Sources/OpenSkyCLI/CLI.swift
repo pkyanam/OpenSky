@@ -102,11 +102,13 @@ enum OpenSkyCommandLine {
     static func state(_ args: [String]) async throws {
         guard let app = args.first else { throw usageError("state <app>") }
         var noShot = false
+        var fullTree = false
         var outDir: URL? = nil
         var iter = args.dropFirst().makeIterator()
         while let flag = iter.next() {
             switch flag {
             case "--no-shot": noShot = true
+            case "--full", "--no-diff", "--disable-diff": fullTree = true
             case "--out": outDir = URL(fileURLWithPath: iter.next() ?? ".")
             default: break
             }
@@ -118,7 +120,7 @@ enum OpenSkyCommandLine {
                 screenshotDirectory: outDir
             )
         )
-        let result = try await probe.getAppState(app)
+        let result = try await probe.getAppState(app, disableDiff: fullTree)
         print("app=\(result.app)")
         if let instructions = result.appSpecificInstructions {
             print("instructions=\(instructions)")
