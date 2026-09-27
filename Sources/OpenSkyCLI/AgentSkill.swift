@@ -38,6 +38,8 @@ enum AgentSkill {
     opensky click <app> (--element N | --x N --y N) [--button left|right|middle] [--count N]
     opensky press-key <app> "Control_L+a"     # X11 keysym chords
     opensky type <app> "text"
+    opensky navigate <app> "https://url"   # Chromium browsers: atomic URL navigation
+                                           # (one focus activation, restored after)
     opensky set-value <app> --element N --value "text"     # for text fields
     opensky select-text <app> --element N --text "needle" [--prefix P] [--suffix S]
     opensky action <app> --element N --action AXPress       # any AX action name

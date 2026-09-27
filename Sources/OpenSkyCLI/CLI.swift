@@ -44,6 +44,8 @@ enum OpenSkyCommandLine {
                 try await pressKey(rest)
             case "type":
                 try await typeText(rest)
+            case "navigate":
+                try await navigate(rest)
             case "set-value":
                 try await setValue(rest)
             case "select-text":
@@ -160,6 +162,14 @@ enum OpenSkyCommandLine {
         }
         try await client.typeText(app: app, text: args[1])
         print("type ok")
+    }
+
+    static func navigate(_ args: [String]) async throws {
+        guard let app = args.first, args.count >= 2 else {
+            throw usageError("navigate <app> \"https://example.com\"")
+        }
+        try await client.navigateTo(app: app, url: args[1])
+        print("navigate ok")
     }
 
     static func setValue(_ args: [String]) async throws {

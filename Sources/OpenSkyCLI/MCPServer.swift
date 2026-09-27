@@ -23,7 +23,9 @@ enum MCPServer {
         ToolSpec(name: "type_text", description: "Type text into the focused element of an app. Click or set_value a field first.",
                  inputSchema: #"{"type":"object","properties":{"app":{"type":"string"},"text":{"type":"string"}},"required":["app","text"],"additionalProperties":false}"#),
         ToolSpec(name: "press_key", description: "Press a key chord, X11 keysym style (e.g. \"Control_L+a\", \"Return\", \"Escape\").",
-                 inputSchema: #"{"type":"object","properties":{"app":{"type":"string"},"key":{"type":"string"}},"required":["app","key"],"additionalProperties":false}"#),
+                 inputSchema: #"{\"type":"object","properties":{"app":{"type":"string"},"key":{"type":"string"}},"required":["app","key"],"additionalProperties":false}"#),
+        ToolSpec(name: "navigate", description: "Navigate a Chromium-based browser (Chrome, Edge, Brave, Helium, Arc) to a URL atomically: focuses the address bar, types the URL, presses Return — one focus activation with restore. Use this instead of type/press-key recipes for URLs.",
+                 inputSchema: #"{\"type":"object","properties":{"app":{"type":"string"},"url":{"type":"string"}},"required":["app","url"],"additionalProperties":false}"#),
         ToolSpec(name: "drag", description: "Drag from window-relative (fromX,fromY) to (toX,toY).",
                  inputSchema: #"{"type":"object","properties":{"app":{"type":"string"},"from_x":{"type":"number"},"from_y":{"type":"number"},"to_x":{"type":"number"},"to_y":{"type":"number"}},"required":["app","from_x","from_y","to_x","to_y"],"additionalProperties":false}"#),
         ToolSpec(name: "scroll", description: "Scroll an app up/down/left/right by pages, at an element or coordinates.",
@@ -126,6 +128,9 @@ enum MCPServer {
                 out = "ok"
             case "press_key":
                 try await client.pressKey(app: args["app"] as? String ?? "", key: args["key"] as? String ?? "")
+                out = "ok"
+            case "navigate":
+                try await client.navigateTo(app: args["app"] as? String ?? "", url: args["url"] as? String ?? "")
                 out = "ok"
             case "drag":
                 try await client.drag(app: args["app"] as? String ?? "",

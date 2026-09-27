@@ -102,6 +102,20 @@ public enum SkyAXActions {
         guard err == .success else {
             throw axError(err, requestType: "setValue", detail: "AXValue set on element \(elementIndex)")
         }
+        // Read-back verification: some elements (Chromium's omnibox notably)
+        // ACCEPT the AX write but silently ignore it — the visible value
+        // never changes. Surface that honestly so the agent falls back to
+        // click + type (keystroke semantics) instead of trusting the value.
+        var readBack: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, SkyAXWalker.valueAttr as CFString, &readBack)
+        if let s = readBack as? String, s != value {
+            throw SkyComputerUseError(
+                code: 0,
+                errorName: .unsupportedAction,
+                message: "Element \(elementIndex) accepted the AX value write but did not apply it (read-back shows '\(s)'). This element likely ignores synthetic value writes — use click + typeText instead.",
+                requestType: "setValue"
+            )
+        }
     }
 
     // MARK: - performSecondaryAction

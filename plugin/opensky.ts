@@ -154,6 +154,24 @@ export default {
             })
 
             editor.add({
+                name: "opensky_navigate",
+                description:
+                    'Navigate a Chromium-based browser (Chrome, Edge, Brave, Helium, Arc) to a URL atomically: focuses the address bar, types the URL, presses Return — one focus activation, focus restored to the user afterwards. ALWAYS prefer this over type/press-key recipes for URLs.',
+                input: {
+                    type: "object",
+                    properties: {
+                        app: { type: "string", description: "bundle id, display name, or pid:N" },
+                        url: { type: "string", description: 'Full URL, e.g. "https://www.youtube.com".' },
+                    },
+                    required: ["app", "url"],
+                    additionalProperties: false,
+                },
+                async execute(input: any) {
+                    return text(await run(["navigate", input.app, input.url]))
+                },
+            })
+
+            editor.add({
                 name: "opensky_scroll",
                 description: "Scroll a macOS app up/down/left/right by pages, at the window, an element, or coordinates.",
                 input: {

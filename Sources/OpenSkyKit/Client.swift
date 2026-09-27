@@ -115,7 +115,21 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
             let stateText: String
             if let previous, previous.nodes.count > 0 {
                 let diff = SkyStateDiffer.diff(old: previous, new: snapshot)
-                stateText = diff.text
+                // Staleness guard: a huge diff or a window-title change means
+                // the agent's mental model (and any cached indices) is stale —
+                // deliver the full tree and say so, instead of a diff that
+                // references removed/shifted elements.
+                let churn = Double(diff.removed.count + diff.added.count) / Double(max(snapshot.nodes.count, 1))
+                let titleChanged = previous.windowTitle != snapshot.windowTitle
+                if titleChanged || churn > 0.5 {
+                    let churned = diff.added.count + diff.removed.count
+                    let header = titleChanged
+                        ? "(window changed: title now '\(snapshot.windowTitle ?? "?")' — full tree follows; re-locate elements before acting)\n"
+                        : "(window changed: \(churned) elements churned — full tree follows; re-locate elements before acting)\n"
+                    stateText = header + snapshot.text
+                } else {
+                    stateText = diff.text
+                }
             } else {
                 stateText = snapshot.text
             }
@@ -177,7 +191,22 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
                         // snapshot-frame coordinate click below.
                     }
                 }
-                guard let frame = node.frame else {
+                // Read the LIVE frame at click time: page reflows move
+                // elements between state-capture and click; a snapshot frame
+                // can point at whatever moved into the old coordinates.
+                let liveFrame: SkyAXFrame? = { () -> SkyAXFrame? in
+                    guard let liveEl = try? SkyAXActions.element(pid: pid_t(pid), index: elementIndex) else { return nil }
+                    var raw: CFTypeRef?
+                    let err = AXUIElementCopyAttributeValue(liveEl, "AXFrame" as CFString, &raw)
+                    guard err == .success, let v = raw else { return nil }
+                    // AXFrame arrives as an AXValue encoding CGRect.
+                    if let rect = v as? NSValue {
+                        let r = rect.rectValue
+                        return SkyAXFrame(x: Double(r.origin.x), y: Double(r.origin.y), width: Double(r.size.width), height: Double(r.size.height))
+                    }
+                    return nil
+                }()
+                guard let frame = liveFrame ?? node.frame else {
                     throw SkyComputerUseError(
                         code: 0,
                         errorName: .elementNotFound,
@@ -189,7 +218,16 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
                     x: frame.x + frame.width / 2,
                     y: frame.y + frame.height / 2
                 )
-                // Reference parity: targeted mouse input does NOT activate the app.
+                // Reference parity: targeted mouse input does NOT activate
+                // the app. But the click must land on the TARGET WINDOW, not
+                // whatever overlaps it — AXRaise the target window (z-order
+                // only, zero app activation), then click.
+                if let liveEl = try? SkyAXActions.element(pid: pid_t(pid), index: elementIndex),
+                   let win = liveEl.axWindow() {
+                    AXUIElementPerformAction(win, kAXRaiseAction as CFString)
+                    let deadline = Date().addingTimeInterval(0.10)
+                    while Date() < deadline { }
+                }
                 try SkyEventSynthesizer.click(at: center, button: mouseButton.canonical.type, clickCount: clickCount)
             } else if let x, let y {
                 // Window-relative coordinate: offset by the window's global frame.
@@ -253,9 +291,12 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
             let app = try SkyAppResolver.resolveRunning(appIdentifier)
             // Keyboard on macOS requires a key window. Reference parity:
             // activate ONLY when the app is not already active; mouse paths
-            // never activate.
+            // never activate. ASYNC PARITY: restore the user's previous
+            // frontmost app afterwards, so agent work never steals focus.
+            let previous = NSWorkspace.shared.frontmostApplication
             if !app.isActive { try activateIfNeeded(app) }
             try SkyEventSynthesizer.pressKey(key)
+            restoreFocus(from: previous, to: app)
         }
     }
 
@@ -266,8 +307,10 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
     public func typeText(app appIdentifier: String, text: String) async throws {
         try await gatedVoid(appIdentifier: appIdentifier, requestType: "typeText") { [self] _, _ in
             let app = try SkyAppResolver.resolveRunning(appIdentifier)
+            let previous = NSWorkspace.shared.frontmostApplication
             if !app.isActive { try activateIfNeeded(app) }
             try SkyEventSynthesizer.typeText(text)
+            restoreFocus(from: previous, to: app)
         }
     }
 
@@ -395,8 +438,10 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
             let saved = try pasteboardWrapper.save()
             defer { pasteboardWrapper.restore(saved) }
             try pasteboardWrapper.write(payload)
+            let previous = NSWorkspace.shared.frontmostApplication
             if !app.isActive { try activateIfNeeded(app) }
             try SkyEventSynthesizer.pressKey("Control_L+v")
+            restoreFocus(from: previous, to: app)
         }
     }
 
@@ -508,6 +553,45 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
         }
     }
 
+    /// Atomic URL navigation for Chromium-family browsers: focus the
+    /// omnibox, type, commit — ONE activation, focus restored at the end.
+    /// Composed op because piecemeal key calls re-activate per process and
+    /// race the omnibox autocomplete (the 'youtube.comcom' bug class).
+    public func navigateTo(app appIdentifier: String, url: String) async throws {
+        try await gatedVoid(appIdentifier: appIdentifier, requestType: "navigate") { [self] _, _ in
+            let app = try SkyAppResolver.resolveRunning(appIdentifier)
+            let previous = NSWorkspace.shared.frontmostApplication
+            if !app.isActive { try activateIfNeeded(app) }
+            // Focus omnibox (selects all), type the full URL (replaces), commit.
+            try SkyEventSynthesizer.pressKey("Meta_L+l")
+            let deadline = Date().addingTimeInterval(0.35)
+            while Date() < deadline { }
+            try SkyEventSynthesizer.typeText(url)
+            let commitDelay = Date().addingTimeInterval(0.30)
+            while Date() < commitDelay { }
+            try SkyEventSynthesizer.pressKey("Return")
+            restoreFocus(from: previous, to: app)
+        }
+    }
+
+    /// Async parity: give keyboard focus back to what the user was using.
+    /// Agent work activates the target only for the duration of the action.
+    func restoreFocus(from previous: NSRunningApplication?, to target: NSRunningApplication) {
+        // Agents chaining multiple keyboard ops set OPENSKY_NO_RESTORE=1 to
+        // keep the target focused until the sequence ends (batch mode).
+        if ProcessInfo.processInfo.environment["OPENSKY_NO_RESTORE"] == "1" { return }
+        guard let prev = previous, prev.processIdentifier != target.processIdentifier else { return }
+        Thread.sleep(forTimeInterval: 0.06)
+        // NSWorkspace activation must run on the main thread.
+        if Thread.isMainThread {
+            _ = prev.activate(options: [])
+        } else {
+            DispatchQueue.main.sync {
+                _ = prev.activate(options: [])
+            }
+        }
+    }
+
     func storeSnapshot(_ key: String, _ snapshot: SkyAXSnapshot) {
         snapshotLock.lock()
         defer { snapshotLock.unlock() }
@@ -575,8 +659,48 @@ public final class SkyMacComputerUseClient: @unchecked Sendable {
             return
                 "Numbers: click once to select a cell (three to replace contents); values save immediately."
         default:
+            // Chromium-based browsers (incl. Helium): the omnibox ignores AX
+            // value writes. The reliable navigation recipe is keyboard-only.
+            if isChromiumFamily(bundleID) {
+                return
+                    "Chromium browser: navigate with pressKey(\"Meta_L+l\") to focus the address bar, then typeText the URL, then pressKey(\"Return\"). Do NOT use setValue on the address bar — Chromium accepts but ignores it. Do NOT clear with Meta+A/Delete first; Meta+L selects all existing text, typing replaces it."
+            }
             return nil
         }
+    }
+
+    /// Chromium-family bundle IDs (Helium, Chrome, Edge, Brave, Arc…).
+    func isChromiumFamily(_ bundleID: String) -> Bool {
+        let known: Set<String> = [
+            "net.imput.helium", "com.google.chrome", "com.microsoft.edgemac",
+            "com.brave.browser", "company.thebrowser.browser.arc", "com.vivaldi.browser",
+            "com.opera.browser", "com.github.thorium.thorium"
+        ]
+        if known.contains(bundleID.lowercased()) { return true }
+        // Chromium manifests identify via KSExec path containing the binary name.
+        if let path = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path.lowercased() {
+            return path.contains("chrome") || path.contains("chromium") || path.contains("helium")
+        }
+        return false
+    }
+}
+
+extension AXUIElement {
+    /// Walk up to the enclosing AXWindow of this element (nil when orphaned).
+    func axWindow() -> AXUIElement? {
+        var cur: AXUIElement? = self
+        for _ in 0..<12 {
+            guard let el = cur else { return nil }
+            var role: CFTypeRef?
+            AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &role)
+            if (role as? String) == "AXWindow" { return el }
+            var parent: CFTypeRef?
+            let err = AXUIElementCopyAttributeValue(el, kAXParentAttribute as CFString, &parent)
+            guard err == .success, let p = parent else { return nil }
+            let unmanaged = Unmanaged<AXUIElement>.fromOpaque(p as! UnsafeRawPointer)
+            cur = unmanaged.takeUnretainedValue()
+        }
+        return nil
     }
 }
 

@@ -14,6 +14,8 @@ public enum SkySnapshotStore {
 
     struct StoredSnapshot: Codable {
         var appID: String
+        var windowTitle: String?
+        var windowFrameX: Double?, windowFrameY: Double?, windowFrameW: Double?, windowFrameH: Double?
         var nodes: [StoredNode]
         struct StoredNode: Codable {
             var elementIndex: Int
@@ -52,8 +54,15 @@ public enum SkySnapshotStore {
                 childCount: 0
             )
         }
+        let winFrame: SkyAXFrame?
+        if let x = stored.windowFrameX, let y = stored.windowFrameY,
+           let w = stored.windowFrameW, let h = stored.windowFrameH {
+            winFrame = SkyAXFrame(x: x, y: y, width: w, height: h)
+        } else {
+            winFrame = nil
+        }
         return SkyAXSnapshot(
-            appID: stored.appID, pid: 0, windowTitle: nil, windowFrame: nil,
+            appID: stored.appID, pid: 0, windowTitle: stored.windowTitle, windowFrame: winFrame,
             nodes: nodes, text: "", capturedAt: Date()
         )
     }
@@ -63,6 +72,11 @@ public enum SkySnapshotStore {
         try? fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
         let stored = StoredSnapshot(
             appID: appID,
+            windowTitle: snapshot.windowTitle,
+            windowFrameX: snapshot.windowFrame?.x,
+            windowFrameY: snapshot.windowFrame?.y,
+            windowFrameW: snapshot.windowFrame?.width,
+            windowFrameH: snapshot.windowFrame?.height,
             nodes: snapshot.nodes.map { n in
                 .init(elementIndex: n.elementIndex, role: n.role, title: n.title, value: n.value,
                       x: n.frame?.x, y: n.frame?.y, w: n.frame?.width, h: n.frame?.height,
